@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Code Test Sandbox</title>
+<style>
+  body {
+    font-family: monospace;
+    margin: 0; padding: 0;
+    background: #eee;
+    color: #111;
+    display: flex; flex-direction: column; height: 100vh;
+    transition: background 0.3s, color 0.3s;
+  }
+  body.dark {
+    background: #121212;
+    color: #eee;
+  }
+  header {
+    background: #444; color: white;
+    display: flex; align-items: center;
+    padding: 0.4em 1em;
+    gap: 0.5em;
+  }
+  header.dark {
+    background: #222;
+  }
+  button {
+    cursor: pointer;
+    font-weight: bold;
+    padding: 0.3em 0.8em;
+    border: none;
+    border-radius: 4px;
+    background: #38a;
+    color: white;
+    transition: background 0.2s;
+  }
+  button:hover {
+    background: #27f;
+  }
+  #tabs {
+    display: flex;
+    background: #ddd;
+    overflow-x: auto;
+    border-bottom: 2px solid #999;
+  }
+  #tabs.dark {
+    background: #222;
+    border-color: #555;
+  }
+  .tab {
+    padding: 0.3em 0.8em;
+    cursor: pointer;
+    user-select: none;
+    display: flex; align-items: center;
+    gap: 0.4em;
+    border-right: 1px solid #bbb;
+  }
+  .tab.dark {
+    border-color: #444;
+  }
+  .tab.active {
+    background: #38a;
+    color: white;
+    font-weight: bold;
+  }
+  .tab button.close-btn {
+    background: transparent;
+    border: none;
+    color: inherit;
+    font-weight: bold;
+    cursor: pointer;
+    padding: 0 0.3em;
+  }
+  #editor, #outputFrame {
+    flex-grow: 1;
+    width: 100%;
+    border: none;
+    font-family: monospace;
+    font-size: 1em;
+    padding: 0.5em;
+    box-sizing: border-box;
+    resize: none;
+    background: white;
+    color: black;
+  }
+  body.dark #editor {
+    background: #111;
+    color: #eee;
+  }
+  #editor {
+    display: block;
+  }
+  #outputFrame {
+    display: none;
+    border: none;
+    height: 100%;
+  }
+  #consolePanel {
+    height: 100px;
+    overflow-y: auto;
+    background: #222;
+    color: #eee;
+    font-size: 0.9em;
+    padding: 0.5em;
+    font-family: monospace;
+    display: none;
+  }
+  #consolePanel.dark {
+    background: #111;
+  }
+  #settingsPanel {
+    position: fixed;
+    top: 50px; right: 10px;
+    background: #eee;
+    color: #111;
+    border: 1px solid #aaa;
+    padding: 1em;
+    max-width: 300px;
+    font-size: 0.9em;
+    display: none;
+    z-index: 1000;
+    box-shadow: 0 0 10px rgba(0,0,0,0.2);
+  }
+  #settingsPanel.dark {
+    background: #222;
+    color: #eee;
+    border-color: #555;
+  }
+  #settingsPanel label {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    margin-bottom: 0.5em;
+  }
+  #runButton {
+    margin-left: auto;
+    background: #4a4;
+  }
+  #runButton:hover {
+    background: #6c6;
+  }
+</style>
+</head>
+<body>
+
+<header id="header">
+  <button id="createBtn">+ Create</button>
+  <button id="settingsBtn">Settings</button>
+  <button id="runButton">Run</button>
+</header>
+
+<div id="tabs" aria-label="Code editor tabs"></div>
+
+<textarea id="editor" spellcheck="false" placeholder="Create a tab to start coding..."></textarea>
+
+<iframe id="outputFrame" sandbox="allow-scripts allow-same-origin"></iframe>
+
+<div id="consolePanel" aria-live="polite" aria-atomic="true"></div>
+
+<div id="settingsPanel" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+  <h2 id="settingsTitle">Settings</h2>
+  <label><input type="checkbox" id="themeToggle" /> Dark Theme</label>
+  <label><input type="checkbox" id="consoleToggle" /> Show Console</label>
+  <button id="deleteTabsBtn">Delete All Tabs</button>
+  <p>Current Version: 1.0.0</p>
+  <button id="closeSettingsBtn">Close</button>
+</div>
+
+<script>
+(() => {
+  const createBtn = document.getElementById('createBtn');
+  const settingsBtn = document.getElementById('settingsBtn');
+  const runBtn = document.getElementById('runButton');
+  const tabsDiv = document.getElementById('tabs');
+  const editor = document.getElementById('editor');
+  const outputFrame = document.getElementById('outputFrame');
+  const consolePanel = document.getElementById('consolePanel');
+  const settingsPanel = document.getElementById('settingsPanel');
+  const themeToggle = document.getElementById('themeToggle');
+  const consoleToggle = document.getElementById('consoleToggle');
+  const deleteTabsBtn = document.getElementById('deleteTabsBtn');
+  const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+  const body = document.body;
+  const header = document.getElementById('header');
+
+  const LANGUAGES = [
+    'JavaScript',
+    'HTML',
+    'CSS',
+    'WebAssembly',
+    'Markdown',
+    'JSON',
+    'YAML',
+    'SVG'
+  ];
+
+  let tabs = [];
+  let activeTabId = null;
+  let errorCount = 0;
+  const MAX_ERRORS = 50;
+
+  function createTab(lang) {
+    const id = Date.now().toString();
+    tabs.push({id, lang, content: ''});
+    activeTabId = id;
+    renderTabs();
+    updateEditor();
+  }
+
+  function deleteTab(id) {
+    tabs = tabs.filter(t => t.id !== id);
+    if (activeTabId === id) {
+      activeTabId = tabs.length ? tabs[tabs.length - 1].id : null;
+      updateEditor();
+    }
+    renderTabs();
+  }
+
+  function renderTabs() {
+    tabsDiv.innerHTML = '';
+    tabsDiv.classList.toggle('dark', body.classList.contains('dark'));
+
+    for (const tab of tabs) {
+      const tabEl = document.createElement('div');
+      tabEl.className = 'tab' + (tab.id === activeTabId ? ' active' : '');
+      if(body.classList.contains('dark')) tabEl.classList.add('dark');
+      tabEl.textContent = tab.lang;
+
+      // Close button
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'close-btn';
+      closeBtn.textContent = '×';
+      closeBtn.title = 'Delete tab';
+      closeBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        deleteTab(tab.id);
+      });
+      tabEl.appendChild(closeBtn);
+
+      tabEl.addEventListener('click', () => {
+        activeTabId = tab.id;
+        updateEditor();
+        renderTabs();
+      });
+
+      tabsDiv.appendChild(tabEl);
+    }
+  }
+
+  function updateEditor() {
+    if (!activeTabId) {
+      editor.value = '';
+      editor.disabled = true;
+      return;
+    }
+    editor.disabled = false;
+    const tab = tabs.find(t => t.id === activeTabId);
+    editor.value = tab ? tab.content : '';
+    editor.focus();
+  }
+
+  editor.addEventListener('input', () => {
+    if (!activeTabId) return;
+    const tab = tabs.find(t => t.id === activeTabId);
+    if (tab) {
+      tab.content = editor.value;
+    }
+  });
+
+  function promptLanguage() {
+    const lang = prompt(`Choose language:\n${LANGUAGES.join('\n')}`, LANGUAGES[0]);
+    if (lang && LANGUAGES.includes(lang)) {
+      createTab(lang);
+    } else if (lang) {
+      alert('Invalid language choice');
+    }
+  }
+
+  createBtn.addEventListener('click', () => {
+    promptLanguage();
+  });
+
+  settingsBtn.addEventListener('click', () => {
+    settingsPanel.style.display = 'block';
+    updateSettingsUI();
+  });
+
+  closeSettingsBtn.addEventListener('click', () => {
+    settingsPanel.style.display = 'none';
+  });
+
+  themeToggle.addEventListener('change', () => {
+    if(themeToggle.checked) {
+      body.classList.add('dark');
+      header.classList.add('dark');
+      tabsDiv.classList.add('dark');
+      consolePanel.classList.add('dark');
+      settingsPanel.classList.add('dark');
+    } else {
+      body.classList.remove('dark');
+      header.classList.remove('dark');
+      tabsDiv.classList.remove('dark');
+      consolePanel.classList.remove('dark');
+      settingsPanel.classList.remove('dark');
+    }
+  });
+
+  consoleToggle.addEventListener('change', () => {
+    if(consoleToggle.checked) {
+      consolePanel.style.display = 'block';
+    } else {
+      consolePanel.style.display = 'none';
+    }
+  });
+
+  deleteTabsBtn.addEventListener('click', () => {
+    if(confirm('Delete all tabs?')) {
+      tabs = [];
+      activeTabId = null;
+      updateEditor();
+      renderTabs();
+      clearConsole();
+    }
+  });
+
+  function clearConsole() {
+    errorCount = 0;
+    consolePanel.textContent = '';
+  }
+
+  // Override console.error to show in our console panel (with limit)
+  const origConsoleError = console.error;
+  console.error = function(...args) {
+    origConsoleError.apply(console, args);
+    if(errorCount >= MAX_ERRORS) return;
+    errorCount++;
+    const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+    const line = document.createElement('div');
+    line.textContent = 'Error: ' + msg;
+    consolePanel.appendChild(line);
+    consolePanel.scrollTop = consolePanel.scrollHeight;
+  };
+
+  runBtn.addEventListener('click', () => {
+    clearConsole();
+
+    // Build full HTML to run, combining tabs
+    // Extract code by language
+    let htmlCode = '';
+    let cssCode = '';
+    let jsCode = '';
+    let wasmBinary = null;
+    let markdownContent = '';
+    let svgCode = '';
+    let jsonData = null;
+    let yamlContent = '';
+
+    for(const tab of tabs) {
+      switch(tab.lang) {
+        case 'HTML': htmlCode += tab.content + '\n'; break;
+        case 'CSS': cssCode += `<style>${tab.content}</style>\n`; break;
+        case 'JavaScript': jsCode += tab.content + '\n'; break;
+        case 'SVG': svgCode += tab.content + '\n'; break;
+        case 'Markdown': markdownContent += tab.content + '\n'; break;
+        case 'JSON':
+          try {
+            jsonData = JSON.parse(tab.content);
+          } catch(e) {
+            console.error('JSON parse error:', e.message);
+          }
+          break;
+        case 'YAML':
+          yamlContent += tab.content + '\n';
+          break;
+        case 'WebAssembly':
+          try {
+            // Expect base64 wasm binary text, decode to binary
+            wasmBinary = Uint8Array.from(atob(tab.content.trim()), c => c.charCodeAt(0));
+          } catch(e) {
+            console.error('WebAssembly decoding error:', e.message);
+          }
+          break;
+      }
+    }
+
+    // Prepare the output document
+    const outputDoc = `
+<!DOCTYPE html> 
+<html> 
+<head>
+<meta charset="UTF-8" />
+<title>Sandbox Output</title>
+${cssCode}
+</head>
+<body>
+${htmlCode}
+${svgCode}
+<div id="markdownContainer"></div>
+
+<script>
+  // Markdown rendering (simple)
+  const mdText = ${JSON.stringify(markdownContent)};
+  function escapeHTML(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  if(mdText.trim()) { 
+    // Minimal markdown to HTML
+    const container = document.getElementById('markdownContainer');
+    // Simple: convert lines starting with # to headings
+    let html = mdText.split('\\n').map(line => {
+      if(line.startsWith('### ')) return '<h3>' + escapeHTML(line.slice(4)) + '</h3>';
+      if(line.startsWith('## ')) return '<h2>' + escapeHTML(line.slice(3)) + '</h2>';
+      if(line.startsWith('# ')) return '<h1>' + escapeHTML(line.slice(2)) + '</h1>';
+      return '<p>' + escapeHTML(line) + '</p>';
+    }).join('');
+    container.innerHTML = html;
+  }
+
+  // Expose JSON data
+  window.jsonData = ${JSON.stringify(jsonData || null)};
+
+  // YAML data as string
+  window.yamlData = ${JSON.stringify(yamlContent)};
+
+  // Run JS
+  try {
+    ${jsCode}
+  } catch(e) {
+    document.body.insertAdjacentHTML('beforeend', '<pre style="color:red;">JS Error: ' + e.message + '</pre>');
+  }
+
+  // WebAssembly run if provided
+  (async () => {
+    try {
+      if(${wasmBinary ? 'true' : 'false'}) {
+        const wasmModule = await WebAssembly.instantiate(Uint8Array.from(atob(${JSON.stringify(tabs.find(t=>t.lang==='WebAssembly')?.content || '')}), c => c.charCodeAt(0)));
+        if(wasmModule.instance.exports._start) {
+          wasmModule.instance.exports._start();
+        }
+      }
+    } catch(e) {
+      document.body.insertAdjacentHTML('beforeend', '<pre style="color:red;">WASM Error: ' + e.message + '</pre>');
+    }
+  })();
+<\/script>
+
+</body>
+</html>`;
+
+    outputFrame.style.display = 'block';
+    editor.style.display = 'none';
+    tabsDiv.style.display = 'none';
+    header.style.display = 'none';
+    consolePanel.style.display = 'none';
+    settingsPanel.style.display = 'none';
+
+    outputFrame.srcdoc = outputDoc;
+  });
+
+  // Press Escape to stop run and return to editor
+  window.addEventListener('keydown', e => {
+    if(e.key === 'Escape' && outputFrame.style.display === 'block') {
+      outputFrame.style.display = 'none';
+      editor.style.display = 'block';
+      tabsDiv.style.display = 'flex';
+      header.style.display = 'flex';
+      if(consoleToggle.checked) consolePanel.style.display = 'block';
+    }
+  });
+
+  function updateSettingsUI() {
+    themeToggle.checked = body.classList.contains('dark');
+    consoleToggle.checked = consolePanel.style.display === 'block';
+  }
+
+  // Initialize UI
+  updateEditor();
+  renderTabs();
+  updateSettingsUI();
+})();
+</script>
+
+</body>
+</html>
+ 
